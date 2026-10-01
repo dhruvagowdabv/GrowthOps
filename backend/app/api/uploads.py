@@ -9,6 +9,7 @@ from app.db.session import SessionLocal
 from app.models.upload import Upload
 from app.services.mapping import map_profile
 from app.services.profiling import profile_csv
+from app.services.validation import validate_csv
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
@@ -19,6 +20,13 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def _get_upload(upload_id: UUID, db: Session) -> Upload:
+    record = db.get(Upload, upload_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    return record
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -76,10 +84,7 @@ def _load_profile(record: Upload) -> dict:
 
 @router.get("/{upload_id}/profile")
 def get_upload_profile(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
-    record = db.get(Upload, upload_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Upload not found")
-
+    record = _get_upload(upload_id, db)
     profile = _load_profile(record)
     return {
         "upload_id": str(record.upload_id),
@@ -91,10 +96,7 @@ def get_upload_profile(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/{upload_id}/mapping")
 def get_upload_mapping(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
-    record = db.get(Upload, upload_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Upload not found")
-
+    record = _get_upload(upload_id, db)
     profile = _load_profile(record)
     mapping = map_profile(profile)
     return {
@@ -102,4 +104,37 @@ def get_upload_mapping(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
         "filename": record.filename,
         "status": record.status,
         "mapping": mapping,
+    }
+
+
+@router.get("/{upload_id}/validation")
+def get_upload_validation(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
+    record = _get_upload(upload_id, db)
+    profile = _load_profile(record)
+    mapping = map_profile(profile)
+
+    expected_types = {
+        item["suggested_field"]: item["inferred_type"]
+        for item in mapping["mappings"]
+        if item["suggested_field"] and item["inferred_type"] != "unknown"
+    }
+    required_fields = {
+        item["suggested_field"]
+        for item in mapping["mappings"]
+        if item["suggested_field"] and item["confidence"] == 1.0
+    }
+    key_fields = ["customer_id"] if "customer_id" in expected_types else []
+
+    validation = validate_csv(
+        record.storage_path,
+        required_fields=required_fields,
+        expected_types=expected_types,
+        key_fields=key_fields,
+    )
+
+    return {
+        "upload_id": str(record.upload_id),
+        "filename": record.filename,
+        "status": record.status,
+        "validation": validation,
     }

@@ -7,6 +7,7 @@ from app.models.business import (
     Product,
     Session,
 )
+from app.models.ingestion import IngestionError, IngestionRun
 from app.models.upload import Upload
 
 __all__ = [
@@ -18,4 +19,6 @@ __all__ = [
     "PaymentAttempt",
     "MarketingSpend",
     "Upload",
+    "IngestionRun",
+    "IngestionError",
 ]

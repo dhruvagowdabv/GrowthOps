@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.upload import Upload
+from app.services.mapping import map_profile
 from app.services.profiling import profile_csv
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
@@ -64,22 +65,41 @@ def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db)) -> d
     }
 
 
+def _load_profile(record: Upload) -> dict:
+    try:
+        return profile_csv(record.storage_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Uploaded file is missing from storage") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/{upload_id}/profile")
 def get_upload_profile(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
     record = db.get(Upload, upload_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Upload not found")
 
-    try:
-        profile = profile_csv(record.storage_path)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Uploaded file is missing from storage") from None
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
+    profile = _load_profile(record)
     return {
         "upload_id": str(record.upload_id),
         "filename": record.filename,
         "status": record.status,
         "profile": profile,
+    }
+
+
+@router.get("/{upload_id}/mapping")
+def get_upload_mapping(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
+    record = db.get(Upload, upload_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+    profile = _load_profile(record)
+    mapping = map_profile(profile)
+    return {
+        "upload_id": str(record.upload_id),
+        "filename": record.filename,
+        "status": record.status,
+        "mapping": mapping,
     }

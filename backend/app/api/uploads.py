@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.upload import Upload
+from app.services.ingestion import ingest_customers_csv
 from app.services.mapping import map_profile
 from app.services.profiling import profile_csv
 from app.services.validation import validate_csv
@@ -113,9 +114,6 @@ def get_upload_validation(upload_id: UUID, db: Session = Depends(get_db)) -> dic
     profile = _load_profile(record)
     mapping = map_profile(profile)
 
-    # Validation runs against the uploaded/source column names. Semantic
-    # mappings describe the target concepts, but the CSV still contains the
-    # original source headers (for example, preferred_device -> device).
     expected_types = {
         item["source_column"]: item["inferred_type"]
         for item in mapping["mappings"]
@@ -144,4 +142,30 @@ def get_upload_validation(upload_id: UUID, db: Session = Depends(get_db)) -> dic
         "filename": record.filename,
         "status": record.status,
         "validation": validation,
+    }
+
+
+@router.post("/{upload_id}/ingest")
+def ingest_upload(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
+    record = _get_upload(upload_id, db)
+    validation = get_upload_validation(upload_id, db)["validation"]
+
+    if validation["status"] != "passed":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": "Upload failed validation", "validation": validation},
+        )
+
+    run = ingest_customers_csv(db, Path(record.storage_path), record.upload_id)
+
+    return {
+        "upload_id": str(record.upload_id),
+        "filename": record.filename,
+        "ingestion": {
+            "run_id": str(run.run_id),
+            "status": run.status,
+            "rows_read": run.rows_read,
+            "rows_inserted": run.rows_inserted,
+            "rows_failed": run.rows_failed,
+        },
     }

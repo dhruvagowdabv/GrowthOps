@@ -1,5 +1,5 @@
 from pathlib import Path
-from uuid import UUID
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
@@ -25,7 +25,7 @@ def upload_csv(file: UploadFile = File(...), db: Session = Depends(get_db)) -> d
         raise HTTPException(status_code=400, detail="Only CSV files are accepted")
 
     settings = get_settings()
-    upload_id = UUID(str(__import__("uuid").uuid4()))
+    upload_id = uuid4()
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
     destination = upload_dir / f"{upload_id}.csv"

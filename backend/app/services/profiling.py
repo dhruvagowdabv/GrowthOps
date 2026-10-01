@@ -33,17 +33,20 @@ def _infer_type(values: list[str]) -> str:
     except ValueError:
         pass
 
+    # Check date-only values before datetimes. datetime.fromisoformat()
+    # also accepts date-only strings and would otherwise classify them as
+    # datetimes.
     try:
         for value in non_null:
-            datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return "datetime"
+            date.fromisoformat(value)
+        return "date"
     except ValueError:
         pass
 
     try:
         for value in non_null:
-            date.fromisoformat(value)
-        return "date"
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return "datetime"
     except ValueError:
         pass
 

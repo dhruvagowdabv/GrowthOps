@@ -113,17 +113,24 @@ def get_upload_validation(upload_id: UUID, db: Session = Depends(get_db)) -> dic
     profile = _load_profile(record)
     mapping = map_profile(profile)
 
+    # Validation runs against the uploaded/source column names. Semantic
+    # mappings describe the target concepts, but the CSV still contains the
+    # original source headers (for example, preferred_device -> device).
     expected_types = {
-        item["suggested_field"]: item["inferred_type"]
+        item["source_column"]: item["inferred_type"]
         for item in mapping["mappings"]
         if item["suggested_field"] and item["inferred_type"] != "unknown"
     }
     required_fields = {
-        item["suggested_field"]
+        item["source_column"]
         for item in mapping["mappings"]
         if item["suggested_field"] and item["confidence"] == 1.0
     }
-    key_fields = ["customer_id"] if "customer_id" in expected_types else []
+    key_fields = [
+        item["source_column"]
+        for item in mapping["mappings"]
+        if item["suggested_field"] == "customer_id" and item["confidence"] == 1.0
+    ]
 
     validation = validate_csv(
         record.storage_path,

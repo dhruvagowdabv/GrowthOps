@@ -3,7 +3,6 @@ from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.models.business import Customer
@@ -25,7 +24,8 @@ REQUIRED_COLUMNS = tuple(SOURCE_TO_CANONICAL)
 def ingest_customers_csv(db: Session, csv_path: Path, upload_id: UUID, batch_size: int = 1000) -> IngestionRun:
     run = IngestionRun(upload_id=upload_id, status="started")
     db.add(run)
-    db.flush()
+    db.commit()
+    db.refresh(run)
 
     try:
         with csv_path.open("r", encoding="utf-8", newline="") as file:
@@ -50,7 +50,7 @@ def ingest_customers_csv(db: Session, csv_path: Path, upload_id: UUID, batch_siz
                     raise ValueError(f"Row {row_number}: duplicate customer_id '{customer_id}'")
                 seen_ids.add(customer_id)
 
-                customer = Customer(
+                batch.append(Customer(
                     customer_id=customer_id,
                     signup_date=datetime.strptime(row["signup_date"].strip(), "%Y-%m-%d").date(),
                     country=row["country"].strip(),
@@ -58,8 +58,7 @@ def ingest_customers_csv(db: Session, csv_path: Path, upload_id: UUID, batch_siz
                     preferred_device=row["preferred_device"].strip(),
                     acquisition_channel=row["acquisition_channel"].strip(),
                     customer_type=row["customer_type"].strip(),
-                )
-                batch.append(customer)
+                ))
 
                 if len(batch) >= batch_size:
                     db.add_all(batch)
@@ -79,17 +78,17 @@ def ingest_customers_csv(db: Session, csv_path: Path, upload_id: UUID, batch_siz
 
     except Exception as exc:
         db.rollback()
-        failed_run = db.get(IngestionRun, run.run_id)
-        if failed_run is None:
-            raise
-        failed_run.status = "failed"
-        failed_run.completed_at = datetime.utcnow()
-        failed_run.rows_failed = max(failed_run.rows_read - failed_run.rows_inserted, 1)
+        run = db.get(IngestionRun, run.run_id)
+        if run is None:
+            raise RuntimeError("Ingestion run could not be recovered after rollback") from exc
+        run.status = "failed"
+        run.completed_at = datetime.utcnow()
+        run.rows_failed = max(run.rows_read - run.rows_inserted, 1)
         db.add(IngestionError(
-            run_id=failed_run.run_id,
-            row_number=failed_run.rows_read + 2,
+            run_id=run.run_id,
+            row_number=run.rows_read + 2,
             error_type=type(exc).__name__,
             message=str(exc),
         ))
         db.commit()
-        return failed_run
+        return run

@@ -167,7 +167,8 @@ def ingest_upload(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
     record = _get_upload(upload_id, db)
     validation = get_upload_validation(upload_id, db)["validation"]
 
-    if validation["status"] != "passed":
+    # Warnings are non-blocking; only validation errors prevent ingestion.
+    if validation["status"] == "error":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"message": "Upload failed validation", "validation": validation},

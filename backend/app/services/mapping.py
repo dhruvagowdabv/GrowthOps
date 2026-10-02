@@ -12,12 +12,18 @@ class MappingCandidate:
 # Controlled aliases keep semantic mapping deterministic and auditable.
 ALIASES: dict[str, set[str]] = {
     "customer_id": {"customer_id", "customerid", "cust_id", "custid", "user_id", "userid", "client_id", "clientid"},
+    "session_id": {"session_id", "sessionid", "session", "visit_id", "visitid"},
     "signup_date": {"signup_date", "signupdate", "registration_date", "registrationdate", "registered_date", "registereddate"},
     "country": {"country", "country_code", "countrycode"},
     "region": {"region", "state", "state_region", "stateprovince"},
     "device": {"device", "device_type", "devicetype", "preferred_device", "preferreddevice"},
     "channel": {"channel", "acquisition_channel", "acquisitionchannel", "traffic_source", "trafficsource"},
     "customer_type": {"customer_type", "customertype", "segment", "customer_segment", "customersegment"},
+    "timestamp": {"timestamp", "event_timestamp", "eventtimestamp", "datetime", "date_time", "datetime_utc"},
+    "date": {"date", "event_date", "eventdate"},
+    "campaign": {"campaign", "campaign_name", "campaignname"},
+    "app_version": {"app_version", "appversion", "application_version", "applicationversion"},
+    "landing_page": {"landing_page", "landingpage", "page", "entry_page", "entrypage"},
 }
 
 

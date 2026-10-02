@@ -1,3 +1,4 @@
+import csv
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.upload import Upload
-from app.services.ingestion import ingest_customers_csv
+from app.services.ingestion import ingest_customers_csv, ingest_sessions_csv
 from app.services.mapping import map_profile
 from app.services.profiling import profile_csv
 from app.services.validation import validate_csv
@@ -83,6 +84,22 @@ def _load_profile(record: Upload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _get_source_columns(record: Upload) -> set[str]:
+    try:
+        with Path(record.storage_path).open("r", encoding="utf-8", newline="") as file:
+            fieldnames = csv.DictReader(file).fieldnames
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Uploaded file is missing from storage") from None
+    if fieldnames is None:
+        raise HTTPException(status_code=422, detail="CSV has no header row")
+    return set(fieldnames)
+
+
+def _is_session_upload(record: Upload) -> bool:
+    columns = _get_source_columns(record)
+    return {"session_id", "customer_id"}.issubset(columns)
+
+
 @router.get("/{upload_id}/profile")
 def get_upload_profile(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
     record = _get_upload(upload_id, db)
@@ -127,7 +144,7 @@ def get_upload_validation(upload_id: UUID, db: Session = Depends(get_db)) -> dic
     key_fields = [
         item["source_column"]
         for item in mapping["mappings"]
-        if item["suggested_field"] == "customer_id" and item["confidence"] == 1.0
+        if item["suggested_field"] in {"customer_id", "session_id"} and item["confidence"] == 1.0
     ]
 
     validation = validate_csv(
@@ -156,7 +173,10 @@ def ingest_upload(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
             detail={"message": "Upload failed validation", "validation": validation},
         )
 
-    run = ingest_customers_csv(db, Path(record.storage_path), record.upload_id)
+    if _is_session_upload(record):
+        run = ingest_sessions_csv(db, Path(record.storage_path), record.upload_id)
+    else:
+        run = ingest_customers_csv(db, Path(record.storage_path), record.upload_id)
 
     return {
         "upload_id": str(record.upload_id),

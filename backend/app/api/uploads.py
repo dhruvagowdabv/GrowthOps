@@ -8,8 +8,13 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.upload import Upload
-from app.services.ingestion import ingest_customers_csv, ingest_sessions_csv
-from app.services.mapping import map_profile
+from app.services.ingestion import (
+    SESSION_REQUIRED_COLUMNS,
+    REQUIRED_COLUMNS,
+    ingest_customers_csv,
+    ingest_sessions_csv,
+)
+from app.services.mapping import build_source_to_canonical, map_profile
 from app.services.profiling import profile_csv
 from app.services.validation import validate_csv
 
@@ -95,9 +100,18 @@ def _get_source_columns(record: Upload) -> set[str]:
     return set(fieldnames)
 
 
-def _is_session_upload(record: Upload) -> bool:
-    columns = _get_source_columns(record)
-    return {"session_id", "customer_id"}.issubset(columns)
+def _get_mapping(record: Upload) -> dict:
+    return map_profile(_load_profile(record))
+
+
+def _is_session_upload(record: Upload, mapping: dict) -> bool:
+    source_to_canonical = build_source_to_canonical(mapping, set(SESSION_REQUIRED_COLUMNS))
+    return {"session_id", "customer_id"}.issubset(source_to_canonical.values())
+
+
+def _get_ingestion_mapping(mapping: dict, is_session: bool) -> dict[str, str]:
+    canonical_fields = set(SESSION_REQUIRED_COLUMNS if is_session else REQUIRED_COLUMNS)
+    return build_source_to_canonical(mapping, canonical_fields)
 
 
 @router.get("/{upload_id}/profile")
@@ -115,8 +129,7 @@ def get_upload_profile(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
 @router.get("/{upload_id}/mapping")
 def get_upload_mapping(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
     record = _get_upload(upload_id, db)
-    profile = _load_profile(record)
-    mapping = map_profile(profile)
+    mapping = _get_mapping(record)
     return {
         "upload_id": str(record.upload_id),
         "filename": record.filename,
@@ -174,10 +187,24 @@ def ingest_upload(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
             detail={"message": "Upload failed validation", "validation": validation},
         )
 
-    if _is_session_upload(record):
-        run = ingest_sessions_csv(db, Path(record.storage_path), record.upload_id)
+    mapping = _get_mapping(record)
+    is_session = _is_session_upload(record, mapping)
+    ingestion_mapping = _get_ingestion_mapping(mapping, is_session)
+
+    if is_session:
+        run = ingest_sessions_csv(
+            db,
+            Path(record.storage_path),
+            record.upload_id,
+            source_to_canonical=ingestion_mapping,
+        )
     else:
-        run = ingest_customers_csv(db, Path(record.storage_path), record.upload_id)
+        run = ingest_customers_csv(
+            db,
+            Path(record.storage_path),
+            record.upload_id,
+            source_to_canonical=ingestion_mapping,
+        )
 
     return {
         "upload_id": str(record.upload_id),

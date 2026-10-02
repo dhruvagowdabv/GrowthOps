@@ -54,7 +54,7 @@ def test_duplicate_customer_rolls_back_customer_rows(tmp_path: Path) -> None:
     run = ingest_customers_csv(db, csv_path, uuid4(), batch_size=1)
 
     assert run.status == "failed"
-    assert run.rows_inserted == 1
+    assert run.rows_inserted == 0
     assert db.scalar(select(Customer).where(Customer.customer_id == "C001")) is None
     error = db.scalar(select(IngestionError).where(IngestionError.run_id == run.run_id))
     assert error is not None

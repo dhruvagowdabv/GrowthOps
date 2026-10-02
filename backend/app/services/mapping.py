@@ -75,3 +75,27 @@ def map_profile(profile: dict) -> dict:
         "column_count": profile.get("column_count", 0),
         "mappings": mappings,
     }
+
+
+def build_source_to_canonical(mapping: dict, canonical_fields: set[str]) -> dict[str, str]:
+    """Convert semantic mapping suggestions into entity-specific source mappings."""
+    source_to_canonical: dict[str, str] = {}
+
+    for item in mapping.get("mappings", []):
+        source_column = item["source_column"]
+        suggested_field = item.get("suggested_field")
+        confidence = item.get("confidence", 0.0)
+        if not suggested_field or confidence < 1.0:
+            continue
+
+        # The mapper uses shared semantic names for device/channel. Customer
+        # ingestion has more specific canonical field names for those values.
+        if suggested_field == "device" and "preferred_device" in canonical_fields:
+            suggested_field = "preferred_device"
+        elif suggested_field == "channel" and "acquisition_channel" in canonical_fields:
+            suggested_field = "acquisition_channel"
+
+        if suggested_field in canonical_fields:
+            source_to_canonical[source_column] = suggested_field
+
+    return source_to_canonical

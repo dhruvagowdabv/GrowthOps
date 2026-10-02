@@ -1,4 +1,4 @@
-from app.services.mapping import map_profile
+from app.services.mapping import build_source_to_canonical, map_profile
 
 
 def test_customer_profile_mapping() -> None:
@@ -34,3 +34,33 @@ def test_unknown_column_requires_review() -> None:
     assert mapping["suggested_field"] is None
     assert mapping["confidence"] == 0.0
     assert mapping["candidates"] == []
+
+
+def test_customer_alias_mapping_resolves_to_ingestion_fields() -> None:
+    profile = {
+        "row_count": 1,
+        "column_count": 3,
+        "columns": [
+            {"name": "cust_id", "inferred_type": "string"},
+            {"name": "registration_date", "inferred_type": "date"},
+            {"name": "device_type", "inferred_type": "string"},
+        ],
+    }
+
+    mapping = map_profile(profile)
+    source_to_canonical = build_source_to_canonical(
+        mapping,
+        {
+            "customer_id",
+            "signup_date",
+            "country",
+            "region",
+            "preferred_device",
+            "acquisition_channel",
+            "customer_type",
+        },
+    )
+
+    assert source_to_canonical["cust_id"] == "customer_id"
+    assert source_to_canonical["registration_date"] == "signup_date"
+    assert source_to_canonical["device_type"] == "preferred_device"

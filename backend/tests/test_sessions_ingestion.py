@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,7 +18,7 @@ def make_session(tmp_path: Path):
     db.add(
         Customer(
             customer_id="C001",
-            signup_date=__import__("datetime").date(2026, 1, 1),
+            signup_date=date(2026, 1, 1),
             country="IN",
             region="KA",
             preferred_device="mobile",
@@ -67,7 +68,7 @@ def test_missing_customer_rolls_back_session_rows(tmp_path: Path) -> None:
     run = ingest_sessions_csv(db, csv_path, uuid4(), batch_size=1)
 
     assert run.status == "failed"
-    assert run.rows_inserted == 1
+    assert run.rows_inserted == 0
     assert db.scalar(select(SessionModel).where(SessionModel.session_id == "S001")) is None
     error = db.scalar(select(IngestionError).where(IngestionError.run_id == run.run_id))
     assert error is not None

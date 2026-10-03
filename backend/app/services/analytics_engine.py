@@ -1,8 +1,4 @@
-"""Generic analytics engine for arbitrary CSV datasets.
-
-The engine is driven by profiling and semantic inference. It does not know
-about customers, sessions, orders, or any other business table by name.
-"""
+"""Generic analytics engine for arbitrary CSV datasets."""
 
 from __future__ import annotations
 
@@ -13,8 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.services.profiling import profile_csv
-from app.services.semantic import infer_schema
-
+from app.services.semantic_engine import infer_schema
 
 MAX_CATEGORY_VALUES = 20
 MAX_TREND_POINTS = 5000
@@ -30,7 +25,6 @@ def _to_number(value: str) -> float | None:
 
 def _to_date(value: str):
     from datetime import date, datetime
-
     value = value.strip()
     try:
         return date.fromisoformat(value)
@@ -45,10 +39,8 @@ def _pearson(xs: list[float], ys: list[float]) -> float | None:
     n = min(len(xs), len(ys))
     if n < 2:
         return None
-    xs = xs[:n]
-    ys = ys[:n]
-    mean_x = sum(xs) / n
-    mean_y = sum(ys) / n
+    xs, ys = xs[:n], ys[:n]
+    mean_x, mean_y = sum(xs) / n, sum(ys) / n
     numerator = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
     denominator_x = math.sqrt(sum((x - mean_x) ** 2 for x in xs))
     denominator_y = math.sqrt(sum((y - mean_y) ** 2 for y in ys))
@@ -58,32 +50,25 @@ def _pearson(xs: list[float], ys: list[float]) -> float | None:
 
 
 def analyze_csv(file_path: str | Path) -> dict[str, Any]:
-    """Analyze an arbitrary CSV without business-table-specific rules."""
+    """Analyze any CSV using structural inference, not table-specific rules."""
     path = Path(file_path)
     profile = profile_csv(path)
     schema = infer_schema(profile)
     columns = schema["columns"]
 
     numeric_names = {
-        column["name"]
-        for column in columns
-        if column["inferred_type"] in {"integer", "number"}
-        and column["semantic"]["role"] == "measure"
+        c["name"] for c in columns
+        if c["inferred_type"] in {"integer", "number"}
+        and c["semantic"]["role"] == "measure"
     }
     category_names = {
-        column["name"]
-        for column in columns
-        if column["semantic"]["role"] in {"category", "flag"}
+        c["name"] for c in columns if c["semantic"]["role"] in {"category", "flag"}
     }
-    date_names = {
-        column["name"]
-        for column in columns
-        if column["semantic"]["role"] == "datetime"
-    }
+    date_names = {c["name"] for c in columns if c["semantic"]["role"] == "datetime"}
 
-    category_counts: dict[str, Counter[str]] = {name: Counter() for name in category_names}
-    date_counts: dict[str, Counter[str]] = {name: Counter() for name in date_names}
-    numeric_stats: dict[str, dict[str, float | int | None]] = {
+    category_counts = {name: Counter() for name in category_names}
+    date_counts = {name: Counter() for name in date_names}
+    numeric_stats = {
         name: {"count": 0, "sum": 0.0, "min": None, "max": None, "mean": None, "m2": 0.0}
         for name in numeric_names
     }
@@ -113,18 +98,16 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
                 number = _to_number(value) if value is not None else None
                 if number is None or math.isnan(number):
                     continue
-
                 row_numeric[name] = number
                 stats = numeric_stats[name]
                 count = int(stats["count"]) + 1
                 old_mean = float(stats["mean"] or 0.0)
                 delta = number - old_mean
                 new_mean = old_mean + delta / count
-                delta2 = number - new_mean
                 stats["count"] = count
                 stats["sum"] = float(stats["sum"] or 0.0) + number
                 stats["mean"] = new_mean
-                stats["m2"] = float(stats["m2"] or 0.0) + delta * delta2
+                stats["m2"] = float(stats["m2"] or 0.0) + delta * (number - new_mean)
                 stats["min"] = number if stats["min"] is None else min(float(stats["min"]), number)
                 stats["max"] = number if stats["max"] is None else max(float(stats["max"]), number)
 
@@ -148,7 +131,6 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
         name: [{"value": value, "count": count} for value, count in counts.most_common(MAX_CATEGORY_VALUES)]
         for name, counts in category_counts.items()
     }
-
     trends = {
         name: [{"date": value, "count": count} for value, count in sorted(counts.items())[:MAX_TREND_POINTS]]
         for name, counts in date_counts.items()
@@ -159,28 +141,20 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
     for index, left in enumerate(numeric_list):
         for right in numeric_list[index + 1:]:
             pairs = [(row[left], row[right]) for row in numeric_rows if left in row and right in row]
-            if len(pairs) < 2:
-                continue
-            coefficient = _pearson([pair[0] for pair in pairs], [pair[1] for pair in pairs])
-            if coefficient is not None:
-                correlations.append({"left": left, "right": right, "coefficient": coefficient})
+            if len(pairs) >= 2:
+                coefficient = _pearson([p[0] for p in pairs], [p[1] for p in pairs])
+                if coefficient is not None:
+                    correlations.append({"left": left, "right": right, "coefficient": coefficient})
 
     candidate_keys = [
         {
-            "column": column["name"],
-            "role": column["semantic"]["role"],
-            "confidence": column["semantic"]["confidence"],
-            "unique_ratio": column["semantic"]["unique_ratio"],
+            "column": c["name"],
+            "role": c["semantic"]["role"],
+            "confidence": c["semantic"]["confidence"],
+            "unique_ratio": c["semantic"]["unique_ratio"],
         }
-        for column in columns
-        if column["semantic"]["role"] in {"identifier", "reference"}
+        for c in columns if c["semantic"]["role"] in {"identifier", "reference"}
     ]
-
-    quality = {
-        "null_cells": sum(column["null_count"] for column in columns),
-        "columns_with_nulls": sum(1 for column in columns if column["null_count"] > 0),
-        "duplicate_column_names": False,
-    }
 
     return {
         "schema": schema,
@@ -192,7 +166,11 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
             "datetime_columns": len(date_names),
             "candidate_key_count": len(candidate_keys),
         },
-        "quality": quality,
+        "quality": {
+            "null_cells": sum(c["null_count"] for c in columns),
+            "columns_with_nulls": sum(1 for c in columns if c["null_count"] > 0),
+            "duplicate_column_names": False,
+        },
         "numeric": numeric_output,
         "distributions": distributions,
         "trends": trends,

@@ -28,7 +28,6 @@ def _dataset_record(record: Upload, include_analytics: bool = True) -> dict:
         "status": record.status,
         "file_size_bytes": record.file_size_bytes,
         "created_at": record.created_at.isoformat(),
-        "path": record.storage_path,
         "analytics": analytics,
     }
 
@@ -75,8 +74,7 @@ def analytics_relationships(
     db: Session = Depends(get_db),
 ) -> dict:
     """Discover likely relationships between uploaded datasets."""
-    query = db.query(Upload).order_by(Upload.created_at.desc())
-    records = query.all()
+    records = db.query(Upload).order_by(Upload.created_at.desc()).all()
     if upload_ids:
         requested = set(upload_ids)
         records = [record for record in records if record.upload_id in requested]

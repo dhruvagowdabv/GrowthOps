@@ -1,0 +1,3 @@
+customer_id,signup_date,country,preferred_device,unknown_field
+C001,2026-01-01,IN,mobile,x
+C002,2026-01-02,IN,desktop,y

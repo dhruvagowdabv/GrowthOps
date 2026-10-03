@@ -39,12 +39,19 @@ def infer_column_semantics(column: dict, row_count: int) -> dict:
     unique_count = int(column.get("unique_count", 0) or 0)
     null_count = int(column.get("null_count", 0) or 0)
     unique_ratio = (unique_count / row_count) if row_count else 0.0
+    id_score = max(_name_score(name, ("id", "uuid", "key", "code", "number", "no")), 0.0)
+    looks_like_id = any(re.search(pattern, name.lower()) for pattern in _ID_PATTERNS)
 
     role = "attribute"
     confidence = 0.55
     subtype = None
 
-    if inferred_type in {"date", "datetime"} or _name_score(name, _DATE_HINTS) >= 0.7:
+    # Identifier detection comes before numeric/string semantics so that
+    # numeric IDs are not incorrectly treated as measures.
+    if looks_like_id and unique_ratio >= 0.8:
+        role = "identifier"
+        confidence = min(0.99, max(0.8, id_score + 0.1))
+    elif inferred_type in {"date", "datetime"} or _name_score(name, _DATE_HINTS) >= 0.7:
         role = "datetime"
         confidence = max(0.8, _name_score(name, _DATE_HINTS))
     elif inferred_type in {"integer", "number"}:
@@ -66,17 +73,9 @@ def infer_column_semantics(column: dict, row_count: int) -> dict:
         role = "flag"
         confidence = 0.95
     elif inferred_type == "string":
-        id_score = max((_name_score(name, (pattern,)) for pattern in ("id", "uuid", "key", "code")), default=0.0)
-        looks_like_id = any(re.search(pattern, name.lower()) for pattern in _ID_PATTERNS)
-        if looks_like_id and unique_ratio >= 0.8:
-            role = "identifier"
-            confidence = min(0.99, max(0.8, id_score + 0.1))
-        elif unique_ratio <= 0.05 or unique_count <= 50:
+        if unique_ratio <= 0.05 or unique_count <= 50:
             role = "category"
             confidence = 0.9
-        elif unique_ratio >= 0.98:
-            role = "identifier_candidate"
-            confidence = 0.65
         else:
             role = "text"
             confidence = 0.75

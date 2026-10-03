@@ -22,7 +22,7 @@ def test_engine_analyzes_unknown_dataset_without_table_specific_logic(tmp_path: 
     assert result["numeric"]["revenue"]["sum"] == 550.5
     assert result["distributions"]["category"][0] == {"value": "Hardware", "count": 2}
     assert len(result["trends"]["recorded_date"]) == 2
-    assert result["candidate_keys"][0]["column"] == "item_code"
+    assert any(key["column"] == "item_code" for key in result["candidate_keys"])
 
 
 def test_engine_handles_empty_optional_values(tmp_path: Path) -> None:

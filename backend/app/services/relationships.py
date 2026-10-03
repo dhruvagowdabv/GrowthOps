@@ -34,6 +34,7 @@ def discover_relationships(datasets: list[dict[str, Any]]) -> list[dict[str, Any
             candidates.append({
                 "upload_id": dataset["upload_id"],
                 "filename": dataset["filename"],
+                "path": dataset["path"],
                 "column": key["column"],
                 "confidence": key["confidence"],
             })
@@ -42,17 +43,17 @@ def discover_relationships(datasets: list[dict[str, Any]]) -> list[dict[str, Any
     for left, right in combinations(candidates, 2):
         if left["upload_id"] == right["upload_id"]:
             continue
-        # Relationship discovery is intentionally conservative: both sides
-        # must look like identifiers and share a meaningful fraction of the
-        # smaller candidate's observed values.
+
         left_values = _identifier_values(Path(left["path"]), left["column"])
         right_values = _identifier_values(Path(right["path"]), right["column"])
         if not left_values or not right_values:
             continue
+
         overlap = len(left_values & right_values)
         ratio = overlap / min(len(left_values), len(right_values))
         if ratio < MIN_OVERLAP:
             continue
+
         relationships.append({
             "left": {
                 "upload_id": left["upload_id"],

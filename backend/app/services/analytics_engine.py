@@ -63,7 +63,6 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
     schema = infer_schema(profile)
     columns = schema["columns"]
 
-    by_name = {column["name"]: column for column in columns}
     numeric_names = {
         column["name"]
         for column in columns
@@ -86,13 +85,14 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
         name: {"count": 0, "sum": 0.0, "min": None, "max": None, "mean": None, "m2": 0.0}
         for name in numeric_names
     }
-    numeric_samples: dict[str, list[float]] = {name: [] for name in numeric_names}
+    numeric_rows: list[dict[str, float]] = []
     row_count = 0
 
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
             row_count += 1
+            row_numeric: dict[str, float] = {}
 
             for name in category_names:
                 value = row.get(name, "")
@@ -104,8 +104,6 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
                 if value is not None and value.strip():
                     parsed = _to_date(value)
                     if parsed is not None:
-                        # ISO date/datetime strings sort correctly and make a
-                        # stable API representation for the frontend.
                         key = parsed.isoformat()[:10]
                         date_counts[name][key] += 1
 
@@ -114,6 +112,8 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
                 number = _to_number(value) if value is not None else None
                 if number is None or math.isnan(number):
                     continue
+
+                row_numeric[name] = number
                 stats = numeric_stats[name]
                 count = int(stats["count"]) + 1
                 old_mean = float(stats["mean"] or 0.0)
@@ -126,8 +126,9 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
                 stats["m2"] = float(stats["m2"] or 0.0) + delta * delta2
                 stats["min"] = number if stats["min"] is None else min(float(stats["min"]), number)
                 stats["max"] = number if stats["max"] is None else max(float(stats["max"]), number)
-                if len(numeric_samples[name]) < CORRELATION_SAMPLE_SIZE:
-                    numeric_samples[name].append(number)
+
+            if row_numeric and len(numeric_rows) < CORRELATION_SAMPLE_SIZE:
+                numeric_rows.append(row_numeric)
 
     numeric_output = {}
     for name, stats in numeric_stats.items():
@@ -162,7 +163,17 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
     numeric_list = list(numeric_names)
     for index, left in enumerate(numeric_list):
         for right in numeric_list[index + 1 :]:
-            coefficient = _pearson(numeric_samples[left], numeric_samples[right])
+            pairs = [
+                (row[left], row[right])
+                for row in numeric_rows
+                if left in row and right in row
+            ]
+            if len(pairs) < 2:
+                continue
+            coefficient = _pearson(
+                [pair[0] for pair in pairs],
+                [pair[1] for pair in pairs],
+            )
             if coefficient is not None:
                 correlations.append({"left": left, "right": right, "coefficient": coefficient})
 

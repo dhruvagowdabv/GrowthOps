@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.upload import Upload
+from app.services.analytics_engine import analyze_csv
 from app.services.ingestion import (
     SESSION_REQUIRED_COLUMNS,
     REQUIRED_COLUMNS,
@@ -123,6 +124,28 @@ def get_upload_profile(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
         "filename": record.filename,
         "status": record.status,
         "profile": profile,
+    }
+
+
+@router.get("/{upload_id}/analytics")
+def get_upload_analytics(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
+    """Return generic analytics for any uploaded CSV.
+
+    This endpoint intentionally has no customer/session/order-specific logic.
+    """
+    record = _get_upload(upload_id, db)
+    try:
+        analytics = analyze_csv(record.storage_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Uploaded file is missing from storage") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {
+        "upload_id": str(record.upload_id),
+        "filename": record.filename,
+        "status": record.status,
+        "analytics": analytics,
     }
 
 

@@ -6,8 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.models.upload import Upload
 from app.services.analytics_engine import analyze_csv
-from app.services.relationships import discover_relationships
-
+from app.services.relationship_engine import discover_relationships
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -37,7 +36,7 @@ def analytics_overview(
     upload_id: UUID | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Generic analytics overview; no business-table assumptions."""
+    """Return generic analytics for one dataset or all uploaded datasets."""
     if upload_id is not None:
         record = db.get(Upload, upload_id)
         if record is None:
@@ -53,10 +52,12 @@ def analytics_overview(
         try:
             analytics = analyze_csv(record.storage_path)
             dataset["summary"] = analytics["summary"]
+            dataset["dataset_type"] = analytics["schema"]["dataset"]
             total_rows += analytics["summary"]["row_count"]
             total_columns += analytics["summary"]["column_count"]
         except (FileNotFoundError, ValueError):
             dataset["summary"] = None
+            dataset["dataset_type"] = None
 
     return {
         "summary": {
@@ -73,7 +74,7 @@ def analytics_relationships(
     upload_ids: list[UUID] | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Discover likely relationships between uploaded datasets."""
+    """Discover likely relationships between arbitrary uploaded datasets."""
     records = db.query(Upload).order_by(Upload.created_at.desc()).all()
     if upload_ids:
         requested = set(upload_ids)

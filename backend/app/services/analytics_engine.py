@@ -13,6 +13,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from app.services.analysis_recommendations import recommend_analyses
 from app.services.profiling import profile_csv
 from app.services.semantic_engine import infer_schema
 
@@ -311,7 +312,7 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
 
     insights = _build_insights(schema, numeric_output, distributions, trends, correlations, quality)
 
-    return {
+    result = {
         "schema": schema,
         "summary": {
             "row_count": row_count,
@@ -329,3 +330,5 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
         "candidate_keys": candidate_keys,
         "insights": insights,
     }
+    result["recommendations"] = recommend_analyses(result)
+    return result

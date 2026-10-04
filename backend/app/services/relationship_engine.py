@@ -25,8 +25,19 @@ def _values(path: Path, column: str) -> set[str]:
     return values
 
 
+def _relationship_confidence(parent: dict, child: dict, overlap_ratio: float) -> float:
+    role_score = 1.0 if parent["role"] == "identifier" and child["role"] == "reference" else 0.75
+    overlap_score = min(1.0, overlap_ratio)
+    return round(min(parent["confidence"], child["confidence"]) * role_score * overlap_score, 4)
+
+
 def discover_relationships(datasets: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Discover likely primary/reference links using schema evidence and overlap."""
+    """Discover likely primary/reference links using schema evidence and overlap.
+
+    Each candidate key is read at most once. This keeps discovery practical as
+    the number of uploaded datasets grows while retaining deterministic,
+    explainable matching rather than guessing relationships from table names.
+    """
     candidates = []
     for dataset in datasets:
         analytics = dataset.get("analytics", {})
@@ -38,7 +49,16 @@ def discover_relationships(datasets: list[dict[str, Any]]) -> list[dict[str, Any
                 "column": key["column"],
                 "role": key["role"],
                 "confidence": key["confidence"],
+                "unique_ratio": key.get("unique_ratio", 0.0),
             })
+
+    values_cache: dict[tuple[str, str], set[str]] = {}
+    for candidate in candidates:
+        cache_key = (candidate["upload_id"], candidate["column"])
+        try:
+            values_cache[cache_key] = _values(Path(candidate["path"]), candidate["column"])
+        except (FileNotFoundError, OSError):
+            values_cache[cache_key] = set()
 
     relationships = []
     for left, right in combinations(candidates, 2):
@@ -47,8 +67,8 @@ def discover_relationships(datasets: list[dict[str, Any]]) -> list[dict[str, Any
         if left["role"] == right["role"] == "reference":
             continue
 
-        left_values = _values(Path(left["path"]), left["column"])
-        right_values = _values(Path(right["path"]), right["column"])
+        left_values = values_cache[(left["upload_id"], left["column"])]
+        right_values = values_cache[(right["upload_id"], right["column"])]
         if not left_values or not right_values:
             continue
 
@@ -57,13 +77,14 @@ def discover_relationships(datasets: list[dict[str, Any]]) -> list[dict[str, Any
         if ratio < MIN_OVERLAP:
             continue
 
-        # Prefer the side with the unique identifier as the referenced parent.
         if left["role"] == "identifier" and right["role"] == "reference":
             parent, child = left, right
         elif right["role"] == "identifier" and left["role"] == "reference":
             parent, child = right, left
-        else:
+        elif left["unique_ratio"] >= right["unique_ratio"]:
             parent, child = left, right
+        else:
+            parent, child = right, left
 
         relationships.append({
             "parent": {
@@ -78,7 +99,7 @@ def discover_relationships(datasets: list[dict[str, Any]]) -> list[dict[str, Any
             },
             "overlap_count": overlap,
             "overlap_ratio": round(ratio, 6),
-            "confidence": round(min(parent["confidence"], child["confidence"]) * min(1.0, ratio), 4),
+            "confidence": _relationship_confidence(parent, child, ratio),
         })
 
     return sorted(relationships, key=lambda item: item["confidence"], reverse=True)

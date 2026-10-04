@@ -275,16 +275,26 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
                 if coefficient is not None:
                     correlations.append({"left": left, "right": right, "coefficient": coefficient})
 
-    candidate_keys = [
-        {
-            "column": column["name"],
-            "role": column["semantic"]["role"],
-            "confidence": column["semantic"]["confidence"],
-            "unique_ratio": column["semantic"]["unique_ratio"],
-        }
-        for column in columns
-        if column["semantic"]["role"] in {"identifier", "reference"}
-    ]
+    candidate_keys = []
+    for column in columns:
+        semantic = column["semantic"]
+        role = semantic["role"]
+        unique_ratio = float(semantic["unique_ratio"])
+        non_null_count = int(column.get("row_count", 0) or 0) - int(column.get("null_count", 0) or 0)
+        is_structurally_unique = (
+            non_null_count > 0
+            and int(column.get("null_count", 0) or 0) == 0
+            and unique_ratio >= 0.95
+        )
+        if role in {"identifier", "reference"} or is_structurally_unique:
+            candidate_keys.append({
+                "name": column["name"],
+                "column": column["name"],
+                "role": role,
+                "confidence": semantic["confidence"],
+                "unique_ratio": unique_ratio,
+                "reason": "semantic_identifier" if role in {"identifier", "reference"} else "high_cardinality_unique",
+            })
 
     null_cells = sum(int(column["null_count"]) for column in columns)
     total_cells = row_count * len(columns)

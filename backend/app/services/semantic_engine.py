@@ -6,13 +6,18 @@ import re
 from collections.abc import Iterable
 
 _ID_PATTERNS = (
-    r"(^|_)(id|uuid|key)$",
-    r"(^|_)(id|uuid|key)(_.*|$)",
+    r"(^|_)(id|uuid|key|record|index|sequence)$",
+    r"(^|_)(id|uuid|key|record|index|sequence)(_.*|$)",
     r"(^|_)(code|number|no)$",
 )
 _DATE_HINTS = ("date", "time", "timestamp", "created", "updated", "joined")
 _CURRENCY_HINTS = ("amount", "price", "cost", "revenue", "sales", "spend", "salary", "profit", "margin")
 _PERCENT_HINTS = ("percent", "percentage", "rate", "ratio", "share")
+_MEASURE_HINTS = (
+    "quantity", "count", "total", "value", "score", "amount", "price", "cost",
+    "revenue", "sales", "spend", "salary", "profit", "margin", "stock", "level",
+    "tenure", "duration", "age", "weight", "height", "distance", "temperature",
+)
 
 
 def _normalize(name: str) -> str:
@@ -39,25 +44,23 @@ def infer_column_semantics(column: dict, row_count: int) -> dict:
     null_count = int(column.get("null_count", 0) or 0)
     non_null_count = max(row_count - null_count, 0)
     unique_ratio = unique_count / non_null_count if non_null_count else 0.0
-    id_score = _name_score(name, ("id", "uuid", "key", "code", "number", "no"))
+    id_score = _name_score(name, ("id", "uuid", "key", "code", "number", "no", "record", "index", "sequence"))
+    measure_score = _name_score(name, _MEASURE_HINTS)
     looks_like_id = any(re.search(pattern, normalized_name) for pattern in _ID_PATTERNS)
 
     role = "attribute"
     confidence = 0.55
     subtype = None
 
-    # Explicit key naming is strongest evidence. Uniqueness provides a
-    # second, domain-independent signal for datasets whose columns use
-    # unfamiliar names.
+    # Identifier naming is strong evidence. Uniqueness alone is only used
+    # for unfamiliar string columns; numeric columns stay measures unless
+    # their names also look identifier-like.
     if looks_like_id and unique_ratio >= 0.8:
         role = "identifier"
         confidence = min(0.99, max(0.8, id_score + 0.1))
     elif looks_like_id and unique_count > 0:
         role = "reference"
         confidence = min(0.95, max(0.7, id_score))
-    elif unique_ratio >= 0.995 and non_null_count >= 3 and inferred_type in {"string", "integer"}:
-        role = "identifier"
-        confidence = 0.82
     elif inferred_type in {"date", "datetime"} or _name_score(name, _DATE_HINTS) >= 0.7:
         role = "datetime"
         confidence = max(0.8, _name_score(name, _DATE_HINTS))
@@ -69,6 +72,8 @@ def infer_column_semantics(column: dict, row_count: int) -> dict:
             subtype, confidence = "percentage_or_rate", percent_score
         elif currency_score >= 0.7:
             subtype, confidence = "currency_like", currency_score
+        elif measure_score >= 0.7:
+            subtype, confidence = "numeric_measure", measure_score
         else:
             subtype, confidence = "numeric", 0.7
     elif inferred_type == "boolean":

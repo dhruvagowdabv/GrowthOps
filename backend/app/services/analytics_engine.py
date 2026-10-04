@@ -280,10 +280,11 @@ def analyze_csv(file_path: str | Path) -> dict[str, Any]:
         semantic = column["semantic"]
         role = semantic["role"]
         unique_ratio = float(semantic["unique_ratio"])
-        non_null_count = int(column.get("row_count", 0) or 0) - int(column.get("null_count", 0) or 0)
+        null_count = int(column.get("null_count", 0) or 0)
+        non_null_count = row_count - null_count
         is_structurally_unique = (
             non_null_count > 0
-            and int(column.get("null_count", 0) or 0) == 0
+            and null_count == 0
             and unique_ratio >= 0.95
         )
         if role in {"identifier", "reference"} or is_structurally_unique:

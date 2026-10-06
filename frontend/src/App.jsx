@@ -78,7 +78,7 @@ export default function App() {
     if (showLoader) setDetailLoading(true);
     try {
       const [detail, rel] = await Promise.all([
-        getOverview(id),
+        getUploadAnalytics(id),
         getRelationships([id]).catch(() => null),
       ]);
       setAnalytics(detail.analytics || null);
@@ -117,10 +117,9 @@ export default function App() {
       if (valid.validation?.status !== "error") {
         try { setIngestion(await ingestUpload(id)); } catch { /* Analytics remains available even if ingestion is not needed. */ }
       }
-      const detail = await getOverview(id);
-      setOverview((old) => ({ ...(old || {}), datasets: [detail, ...((old?.datasets || []).filter((d) => d.upload_id !== id))] }));
-      setSelectedId(id);
-      await loadDataset(id);
+      // Refresh the workspace list from the overview endpoint so the new dataset
+      // has the same summary metadata as every other dataset.
+      await loadOverview(id);
       setPage("Overview");
     } catch (e) { setUploadError(friendly(e)); }
     finally { setUploading(false); }

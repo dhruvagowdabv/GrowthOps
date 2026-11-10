@@ -198,7 +198,7 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
         kpis[name] = {"current": round(a, 2), "previous": round(b, 2), **_change(a, b)}
 
     requested = dimensions or ["region", "device", "app_version", "customer_type", "product_category", "acquisition_channel", "campaign", "product_id", "payment_method", "low_quality_acquisition"]
-    allowed = set(orders[0].keys()) if orders else set()
+    allowed = set(enriched_orders[0].keys()) if enriched_orders else set()
     contributions = {
         dim: _breakdown(orders, prev_orders, dim, "revenue")
         for dim in requested if dim in allowed

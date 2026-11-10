@@ -18,6 +18,7 @@ from app.services.ingestion import (
 from app.services.mapping import build_source_to_canonical, map_profile
 from app.services.profiling import profile_csv
 from app.services.validation import validate_csv
+from app.services.generic_ingestion import ingest_generic_csv
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
@@ -240,3 +241,14 @@ def ingest_upload(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
             "rows_failed": run.rows_failed,
         },
     }
+
+
+@router.post("/{upload_id}/ingest/generic")
+def ingest_generic_upload(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
+    """Persist arbitrary CSV rows without requiring a predefined business table."""
+    record = _get_upload(upload_id, db)
+    try:
+        result = ingest_generic_csv(db, record.storage_path, record.upload_id)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"upload_id": str(record.upload_id), "filename": record.filename, "ingestion": result}

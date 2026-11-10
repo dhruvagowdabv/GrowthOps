@@ -215,7 +215,7 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
     ]:
         kpis[name] = {"current": round(a, 2), "previous": round(b, 2), **_change(a, b)}
 
-    requested = dimensions or ["region", "device", "app_version", "customer_type", "product_category", "acquisition_channel", "campaign", "product_id", "payment_method", "low_quality_acquisition"]
+    requested = dimensions or ["region", "device", "app_version", "customer_type", "product_category", "acquisition_channel", "session_channel", "campaign", "product_id", "payment_method", "low_quality_acquisition"]
     allowed = set(enriched_orders[0].keys()) if enriched_orders else set()
     contributions = {
         dim: _breakdown(orders, prev_orders, dim, "revenue")
@@ -224,13 +224,22 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
 
     event_counts: dict[str, set[str]] = defaultdict(set)
     prev_event_counts: dict[str, set[str]] = defaultdict(set)
+    funnel_segment_current = {dim: defaultdict(set) for dim in ("device", "channel", "app_version", "region")}
+    funnel_segment_previous = {dim: defaultdict(set) for dim in ("device", "channel", "app_version", "region")}
     for row in events_all:
         event_day = _day(row.get("timestamp"))
         if event_day is None:
             continue
         target = event_counts if start <= event_day <= end else prev_event_counts if prev_start <= event_day <= prev_end else None
         if target is not None:
-            target[row.get("event_type") or "(unknown)"].add(row.get("session_id") or row.get("event_id") or "")
+            session_id = row.get("session_id") or row.get("event_id") or ""
+            event_name = row.get("event_type") or "(unknown)"
+            target[event_name].add(session_id)
+            segment_target = funnel_segment_current if target is event_counts else funnel_segment_previous
+            session = session_by_id.get(session_id, {})
+            for dimension in funnel_segment_current:
+                segment_value = session.get(dimension) or "(missing)"
+                segment_target[dimension][(event_name, segment_value)].add(session_id)
     funnel = []
     preferred_order = ["session_start", "product_view", "add_to_cart", "checkout_started", "payment_attempt", "purchase"]
     observed = set(event_counts) | set(prev_event_counts)
@@ -248,6 +257,24 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
             **_change(float(c), float(p)),
         })
         previous_stage_count = c
+
+    funnel_segment_breakdowns = {}
+    for dimension in funnel_segment_current:
+        entries = []
+        keys = set(funnel_segment_current[dimension]) | set(funnel_segment_previous[dimension])
+        for event_name, segment_value in keys:
+            current_count = len(funnel_segment_current[dimension][(event_name, segment_value)])
+            previous_count = len(funnel_segment_previous[dimension][(event_name, segment_value)])
+            entries.append({
+                "stage": event_name,
+                "dimension": dimension,
+                "value": segment_value,
+                "sessions": current_count,
+                "previous_sessions": previous_count,
+                "change": current_count - previous_count,
+                "percentage_change": round((current_count - previous_count) / previous_count * 100, 2) if previous_count else None,
+            })
+        funnel_segment_breakdowns[dimension] = sorted(entries, key=lambda item: abs(item["change"]), reverse=True)[:30]
 
     failure_dimensions = ["device", "app_version", "region", "channel", "payment_method", "failure_reason"]
     payment_failure_contributions = {}
@@ -326,6 +353,7 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
                    "payment_attempts": len(payments), "previous_payment_attempts": len(prev_payments),
                    "payment_failures": cur_fail, "previous_payment_failures": prev_fail},
         "funnel": funnel,
+        "funnel_segment_breakdowns": funnel_segment_breakdowns,
         "daily_revenue_anomalies": daily_anomalies,
         "revenue_contributions": contributions,
         "payment_failure_contributions": payment_failure_contributions,

@@ -9,6 +9,7 @@ import csv
 from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
+from statistics import mean, pstdev
 from typing import Any
 
 DATE_FORMATS = ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S")
@@ -158,6 +159,26 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
 
     cur = _aggregate(orders)
     prev = _aggregate(prev_orders)
+    daily_revenue: dict[str, float] = defaultdict(float)
+    for row in orders:
+        day = _day(row.get("date") or row.get("timestamp"))
+        if day is not None:
+            daily_revenue[day.isoformat()] += _number(row, "amount")
+    daily_values = list(daily_revenue.values())
+    daily_mean = mean(daily_values) if daily_values else 0.0
+    daily_std = pstdev(daily_values) if len(daily_values) > 1 else 0.0
+    daily_anomalies = []
+    if len(daily_values) >= 7 and daily_std > 0:
+        for day, amount in sorted(daily_revenue.items()):
+            z_score = (amount - daily_mean) / daily_std
+            if abs(z_score) >= 2.5:
+                daily_anomalies.append({
+                    "date": day, "revenue": round(amount, 2),
+                    "period_daily_mean": round(daily_mean, 2),
+                    "z_score": round(z_score, 3),
+                    "direction": "above" if z_score > 0 else "below",
+                    "method": "period-wide z-score; exploratory signal",
+                })
     cur_conv = cur["orders"] / len(sessions) * 100 if sessions else 0.0
     prev_conv = prev["orders"] / len(prev_sessions) * 100 if prev_sessions else 0.0
     cur_fail = sum(1 for r in payments if r.get("payment_status", "").lower() not in {"success", "succeeded", "paid"})
@@ -262,6 +283,13 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
                 "statement": f"{name.replace('_', ' ')} {direction} by {abs(pct)}% compared with the previous period.",
                 "evidence": data,
             })
+    for anomaly in daily_anomalies:
+        observations.append({
+            "type": "daily_revenue_anomaly",
+            "metric": "revenue",
+            "statement": f"Revenue on {anomaly['date']} was {anomaly['direction']} the period distribution (z-score {anomaly['z_score']}).",
+            "evidence": anomaly,
+        })
     for dimension, items in contributions.items():
         for item in items[:3]:
             if abs(item["change"]) > 0:
@@ -280,6 +308,7 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
                    "payment_attempts": len(payments), "previous_payment_attempts": len(prev_payments),
                    "payment_failures": cur_fail, "previous_payment_failures": prev_fail},
         "funnel": funnel,
+        "daily_revenue_anomalies": daily_anomalies,
         "revenue_contributions": contributions,
         "payment_failure_contributions": payment_failure_contributions,
         "marketing_efficiency": marketing_efficiency,
@@ -292,6 +321,7 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
             "Segment changes are observational and may be affected by mix shifts, seasonality or confounding factors.",
             "Marketing ROAS uses observed channel-labelled revenue and spend, not incrementality testing.",
             "Inventory signals are descriptive snapshots and do not establish that stockouts caused lost sales.",
+            "Daily revenue anomalies use a period-wide z-score and should be reviewed for calendar, promotion and data-volume effects.",
             "Missing source files or columns reduce the available analysis.",
         ],
     }

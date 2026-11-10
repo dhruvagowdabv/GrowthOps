@@ -98,6 +98,9 @@ def _breakdown(rows: list[dict[str, str]], previous_rows: list[dict[str, str]], 
             "change": round(change, 2),
             "percentage_change": round(change / abs(previous) * 100, 2) if previous else None,
         })
+    net_change = sum(item["change"] for item in results)
+    for item in results:
+        item["contribution_to_net_change_percent"] = round(item["change"] / net_change * 100, 2) if net_change else None
     return sorted(results, key=lambda x: abs(x["change"]), reverse=True)[:limit]
 
 
@@ -167,10 +170,22 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
         if target is not None:
             target[row.get("event_type") or "(unknown)"].add(row.get("session_id") or row.get("event_id") or "")
     funnel = []
-    for event_name in sorted(set(event_counts) | set(prev_event_counts)):
+    preferred_order = ["session_start", "product_view", "add_to_cart", "checkout_started", "payment_attempt", "purchase"]
+    observed = set(event_counts) | set(prev_event_counts)
+    ordered_events = [name for name in preferred_order if name in observed]
+    ordered_events.extend(sorted(observed - set(ordered_events)))
+    previous_stage_count = None
+    for event_name in ordered_events:
         c, p = len(event_counts[event_name]), len(prev_event_counts[event_name])
-        funnel.append({"stage": event_name, "sessions": c, "previous_sessions": p, **_change(float(c), float(p))})
-    funnel.sort(key=lambda x: x["sessions"], reverse=True)
+        funnel.append({
+            "stage": event_name,
+            "sessions": c,
+            "previous_sessions": p,
+            "conversion_from_previous_stage_percent": round(c / previous_stage_count * 100, 2) if previous_stage_count else None,
+            "dropoff_from_previous_stage": max(previous_stage_count - c, 0) if previous_stage_count is not None else None,
+            **_change(float(c), float(p)),
+        })
+        previous_stage_count = c
 
     observations = []
     for name, data in kpis.items():

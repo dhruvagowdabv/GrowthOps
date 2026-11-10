@@ -50,6 +50,7 @@ VERSION_DIR=data/versions
 | POST | `/api/uploads/{id}/cleaning/apply` | Create a cleaned version |
 | GET | `/api/uploads/{id}/versions` | List versions for an upload |
 | GET | `/api/uploads/{id}/versions/{version_id}/drift` | Compare raw and cleaned profiles |
+| GET | `/api/analytics/drift?baseline_upload_id=...&current_upload_id=...` | Compare profiles across two uploaded snapshots |
 | GET | `/api/business/analysis` | KPIs, funnel, comparisons, contributors and explanations |
 
 Example cleaning request:

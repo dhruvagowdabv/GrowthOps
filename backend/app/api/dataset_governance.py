@@ -64,7 +64,7 @@ def upload_versions(upload_id: UUID, db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/{upload_id}/versions/{version_id}/drift")
-def version_drift(upload_id: UUID, version_id: str, db: Session = Depends(get_db)) -> dict:
+def version_drift(upload_id: UUID, version_id: UUID, db: Session = Depends(get_db)) -> dict:
     _upload(upload_id, db)
     settings = get_settings()
     manifest_path = Path(getattr(settings, "version_dir", "data/versions")) / str(upload_id) / f"{version_id}.json"

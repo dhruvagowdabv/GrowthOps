@@ -4,6 +4,9 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
+from sqlalchemy import select
+
+from app.models.generic_dataset import GenericDatasetRecord
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -252,3 +255,26 @@ def ingest_generic_upload(upload_id: UUID, db: Session = Depends(get_db)) -> dic
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"upload_id": str(record.upload_id), "filename": record.filename, "ingestion": result}
+
+
+@router.get("/{upload_id}/records")
+def get_generic_records(
+    upload_id: UUID,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Page through records persisted by generic ingestion."""
+    if limit < 1 or limit > 1000 or offset < 0:
+        raise HTTPException(status_code=422, detail="limit must be 1-1000 and offset must be non-negative")
+    record = _get_upload(upload_id, db)
+    query = select(GenericDatasetRecord).where(
+        GenericDatasetRecord.upload_id == record.upload_id
+    ).order_by(GenericDatasetRecord.row_number).offset(offset).limit(limit)
+    rows = db.scalars(query).all()
+    return {
+        "upload_id": str(upload_id),
+        "limit": limit,
+        "offset": offset,
+        "records": [{"row_number": item.row_number, "data": item.payload} for item in rows],
+    }

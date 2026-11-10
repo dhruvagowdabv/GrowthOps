@@ -112,6 +112,10 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
     sessions_all = _read(root / "sessions.csv")
     events_all = _read(root / "events.csv")
     payments_all = _read(root / "payment_attempts.csv")
+    customers_all = _read(root / "customers.csv")
+    products_all = _read(root / "products.csv")
+    marketing_all = _read(root / "marketing_spend.csv")
+    inventory_all = _read(root / "inventory_daily.csv")
     if not orders_all and not sessions_all:
         raise ValueError("No orders.csv or sessions.csv found in the configured data directory")
 
@@ -126,8 +130,27 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
     span = (end - start).days + 1
     prev_end, prev_start = start - timedelta(days=1), start - timedelta(days=span)
 
-    orders = [r for r in orders_all if _in_period(r, start, end)]
-    prev_orders = [r for r in orders_all if _in_period(r, prev_start, prev_end)]
+    session_by_id = {r.get("session_id"): r for r in sessions_all if r.get("session_id")}
+    customer_by_id = {r.get("customer_id"): r for r in customers_all if r.get("customer_id")}
+    product_by_id = {r.get("product_id"): r for r in products_all if r.get("product_id")}
+    enriched_orders = []
+    for original in orders_all:
+        row = dict(original)
+        session = session_by_id.get(row.get("session_id"), {})
+        customer = customer_by_id.get(row.get("customer_id"), {})
+        product = product_by_id.get(row.get("product_id"), {})
+        for key in ("device", "app_version", "region", "channel"):
+            if session.get(key):
+                row[key if key != "channel" else "session_channel"] = session[key]
+        if customer.get("customer_type"):
+            row["customer_type"] = customer["customer_type"]
+        if product.get("category"):
+            row["product_category"] = product["category"]
+        if product.get("cost"):
+            row["catalog_unit_cost"] = product["cost"]
+        enriched_orders.append(row)
+    orders = [r for r in enriched_orders if _in_period(r, start, end)]
+    prev_orders = [r for r in enriched_orders if _in_period(r, prev_start, prev_end)]
     sessions = [r for r in sessions_all if _in_period(r, start, end)]
     prev_sessions = [r for r in sessions_all if _in_period(r, prev_start, prev_end)]
     payments = [r for r in payments_all if _in_period(r, start, end)]
@@ -153,7 +176,7 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
     ]:
         kpis[name] = {"current": round(a, 2), "previous": round(b, 2), **_change(a, b)}
 
-    requested = dimensions or ["region", "acquisition_channel", "campaign", "product_id", "payment_method", "low_quality_acquisition"]
+    requested = dimensions or ["region", "device", "app_version", "customer_type", "product_category", "acquisition_channel", "campaign", "product_id", "payment_method", "low_quality_acquisition"]
     allowed = set(orders[0].keys()) if orders else set()
     contributions = {
         dim: _breakdown(orders, prev_orders, dim, "revenue")
@@ -187,6 +210,48 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
         })
         previous_stage_count = c
 
+    failure_dimensions = ["device", "app_version", "region", "channel", "payment_method", "failure_reason"]
+    payment_failure_contributions = {}
+    for dim in failure_dimensions:
+        if payments and dim in payments[0]:
+            current_failures = [r for r in payments if r.get("payment_status", "").lower() not in {"success", "succeeded", "paid"}]
+            previous_failures = [r for r in prev_payments if r.get("payment_status", "").lower() not in {"success", "succeeded", "paid"}]
+            payment_failure_contributions[dim] = _breakdown(current_failures, previous_failures, dim, "count")
+
+    spend_current: dict[str, float] = defaultdict(float)
+    spend_previous: dict[str, float] = defaultdict(float)
+    for row in marketing_all:
+        day = _day(row.get("date"))
+        if day is None:
+            continue
+        if start <= day <= end:
+            spend_current[row.get("channel") or "(missing)"] += _number(row, "spend")
+        elif prev_start <= day <= prev_end:
+            spend_previous[row.get("channel") or "(missing)"] += _number(row, "spend")
+    marketing_efficiency = []
+    for channel in sorted(set(spend_current) | set(spend_previous)):
+        current_revenue = sum(_number(r, "amount") for r in orders if r.get("acquisition_channel") == channel)
+        previous_revenue = sum(_number(r, "amount") for r in prev_orders if r.get("acquisition_channel") == channel)
+        current_spend, previous_spend = spend_current[channel], spend_previous[channel]
+        marketing_efficiency.append({
+            "channel": channel,
+            "current_spend": round(current_spend, 2),
+            "previous_spend": round(previous_spend, 2),
+            "current_attributed_revenue": round(current_revenue, 2),
+            "previous_attributed_revenue": round(previous_revenue, 2),
+            "current_roas": round(current_revenue / current_spend, 3) if current_spend else None,
+            "previous_roas": round(previous_revenue / previous_spend, 3) if previous_spend else None,
+            "attribution_note": "Revenue is grouped by the order acquisition_channel field; this is not a causal incrementality estimate.",
+        })
+
+    inventory_summary = {}
+    if inventory_all:
+        current_inventory = [r for r in inventory_all if _in_period(r, start, end)]
+        inventory_summary = {
+            "records": len(current_inventory),
+            "stock_status_counts": dict(__import__("collections").Counter(r.get("stock_status", "(missing)") for r in current_inventory)),
+        }
+
     observations = []
     for name, data in kpis.items():
         pct = data["percentage_change"]
@@ -216,11 +281,17 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
                    "payment_failures": cur_fail, "previous_payment_failures": prev_fail},
         "funnel": funnel,
         "revenue_contributions": contributions,
+        "payment_failure_contributions": payment_failure_contributions,
+        "marketing_efficiency": marketing_efficiency,
+        "inventory_signal": inventory_summary,
         "observations": observations,
         "limitations": [
             "Segment changes are descriptive contributions, not causal proof.",
             "Conversion is orders divided by sessions; attribution may differ if orders span sessions.",
-            "Funnel stages are event types ranked by distinct sessions, not an assumed ordered funnel.",
+            "Known e-commerce event types are ordered into a funnel; unknown event types are appended alphabetically.",
+            "Segment changes are observational and may be affected by mix shifts, seasonality or confounding factors.",
+            "Marketing ROAS uses observed channel-labelled revenue and spend, not incrementality testing.",
+            "Inventory signals are descriptive snapshots and do not establish that stockouts caused lost sales.",
             "Missing source files or columns reduce the available analysis.",
         ],
     }

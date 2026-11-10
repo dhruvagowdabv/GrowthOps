@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://growthops:growthops@localhost:5432/growthops"
     upload_dir: str = "data/uploads"
     business_data_dir: str = "data/business"
+    version_dir: str = "data/versions"
     max_upload_size_bytes: int = 50 * 1024 * 1024
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

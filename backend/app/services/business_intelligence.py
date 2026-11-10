@@ -62,10 +62,23 @@ def _aggregate(rows: list[dict[str, str]]) -> dict[str, float]:
     orders = len({r.get("order_id") for r in rows if r.get("order_id")})
     revenue = sum(_number(r, "amount") for r in rows)
     margin = sum(_number(r, "gross_margin") for r in rows)
+    total_cost = sum(_number(r, "cost") for r in rows)
+    discounts = sum(_number(r, "discount") for r in rows)
+    customer_order_counts: dict[str, int] = defaultdict(int)
+    for row in rows:
+        if row.get("customer_id"):
+            customer_order_counts[row["customer_id"]] += 1
+    unique_customers = len(customer_order_counts)
+    repeat_customers = sum(1 for count in customer_order_counts.values() if count > 1)
     return {
         "orders": orders,
         "revenue": round(revenue, 2),
         "gross_margin": round(margin, 2),
+        "gross_margin_rate_percent": round(margin / revenue * 100, 2) if revenue else 0.0,
+        "total_cost": round(total_cost, 2),
+        "discounts": round(discounts, 2),
+        "unique_customers": unique_customers,
+        "repeat_customer_rate_percent": round(repeat_customers / unique_customers * 100, 2) if unique_customers else 0.0,
         "average_order_value": round(revenue / orders, 2) if orders else 0.0,
     }
 
@@ -191,6 +204,11 @@ def analyze_business(data_dir: str | Path, start_date: str | None = None, end_da
         ("revenue", cur["revenue"], prev["revenue"]),
         ("orders", cur["orders"], prev["orders"]),
         ("gross_margin", cur["gross_margin"], prev["gross_margin"]),
+        ("gross_margin_rate_percent", cur["gross_margin_rate_percent"], prev["gross_margin_rate_percent"]),
+        ("total_cost", cur["total_cost"], prev["total_cost"]),
+        ("discounts", cur["discounts"], prev["discounts"]),
+        ("unique_customers", cur["unique_customers"], prev["unique_customers"]),
+        ("repeat_customer_rate_percent", cur["repeat_customer_rate_percent"], prev["repeat_customer_rate_percent"]),
         ("average_order_value", cur["average_order_value"], prev["average_order_value"]),
         ("conversion_rate_percent", cur_conv, prev_conv),
         ("payment_failure_rate_percent", cur_fail_rate, prev_fail_rate),

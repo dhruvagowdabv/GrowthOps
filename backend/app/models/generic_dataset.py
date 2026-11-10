@@ -5,6 +5,7 @@ from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.upload import Upload  # noqa: F401 - registers the uploads table for metadata
 
 
 class GenericDatasetRecord(Base):

@@ -5,6 +5,7 @@ import csv
 from pathlib import Path
 from uuid import UUID
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.generic_dataset import GenericDatasetRecord
@@ -12,6 +13,11 @@ from app.models.generic_dataset import GenericDatasetRecord
 
 def ingest_generic_csv(db: Session, path: str | Path, upload_id: UUID, batch_size: int = 1000) -> dict:
     source = Path(path)
+    existing_count = db.scalar(
+        select(func.count()).select_from(GenericDatasetRecord).where(GenericDatasetRecord.upload_id == upload_id)
+    )
+    if existing_count:
+        raise ValueError("This upload has already been ingested into the generic record store")
     rows_read = 0
     rows_inserted = 0
     batch = []

@@ -73,9 +73,6 @@ def list_import_sessions(db: Session = Depends(get_db)) -> dict:
     sessions = db.scalars(select(ImportSession).order_by(ImportSession.created_at.desc())).all()
     results = []
     for record in sessions:
-        count = db.scalar(select(Upload.upload_id).where(
-            Upload.import_session_id == record.import_session_id
-        ).count()) if False else None
         uploads = db.scalars(select(Upload.upload_id).where(
             Upload.import_session_id == record.import_session_id
         )).all()
@@ -140,6 +137,7 @@ def upload_session_datasets(
 
             upload_id = uuid4()
             destination = upload_dir / f"{upload_id}.csv"
+            saved_paths.append(destination)
             total_bytes = 0
             with destination.open("wb") as output:
                 while chunk := file.file.read(1024 * 1024):
@@ -152,7 +150,6 @@ def upload_session_datasets(
                     output.write(chunk)
             if total_bytes == 0:
                 raise HTTPException(status_code=400, detail=f"{Path(file.filename).name} is empty")
-            saved_paths.append(destination)
             created.append(Upload(
                 upload_id=upload_id,
                 filename=Path(file.filename).name,

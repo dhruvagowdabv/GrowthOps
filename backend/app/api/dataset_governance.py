@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models.upload import Upload
 from app.services.dataset_governance import apply_cleaning, compare_drift, list_versions, preview_cleaning
+from app.services.profiling import profile_csv
 
 router = APIRouter(prefix="/api/uploads", tags=["dataset-governance"])
 
@@ -73,3 +74,26 @@ def version_drift(upload_id: UUID, version_id: str, db: Session = Depends(get_db
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     return {"upload_id": str(upload_id), "version_id": version_id,
             **compare_drift(manifest["before_profile"], manifest["after_profile"])}
+
+
+drift_router = APIRouter(prefix="/api/analytics", tags=["dataset-governance"])
+
+
+@drift_router.get("/drift")
+def compare_uploaded_datasets(
+    baseline_upload_id: UUID,
+    current_upload_id: UUID,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Compare profiles from two separately uploaded snapshots of a dataset."""
+    baseline = _upload(baseline_upload_id, db)
+    current = _upload(current_upload_id, db)
+    try:
+        result = compare_drift(profile_csv(baseline.storage_path), profile_csv(current.storage_path))
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "baseline_upload_id": str(baseline_upload_id),
+        "current_upload_id": str(current_upload_id),
+        **result,
+    }
